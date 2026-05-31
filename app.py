@@ -425,10 +425,11 @@ def on_user_message(data):
 # ── Entry point ───────────────────────────────────────────────────────
 
 def main():
+    has_port = "PORT" in os.environ or "RENDER" in os.environ
     parser = argparse.ArgumentParser(description="AI Companion — Web Server")
-    parser.add_argument("--no-camera", action="store_true")
-    parser.add_argument("--port", type=int, default=5000)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--no-camera", action="store_true", default=has_port)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 5000)))
+    parser.add_argument("--host", default="0.0.0.0" if has_port else "127.0.0.1")
     parser.add_argument("--cam-index", type=int, default=0)
     args = parser.parse_args()
 
@@ -441,5 +442,11 @@ def main():
     socketio.run(app, host=args.host, port=args.port, debug=False, allow_unsafe_werkzeug=True)
 
 
+import os
+
 if __name__ == "__main__":
-    main()
+    port = int(os.environ.get("PORT", 7860))
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
