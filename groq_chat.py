@@ -76,6 +76,7 @@ class GroqChat:
         self,
         user_message: str,
         facial_emotion: str = "neutral",
+        facial_emotion_confidence: float = 1.0,
         combined_mood: str = "neutral",
         lang: str = "en",
     ) -> str:
@@ -84,6 +85,7 @@ class GroqChat:
         Args:
             user_message:   The text the user said.
             facial_emotion: The user's current facial expression from the camera.
+            facial_emotion_confidence: Confidence score of the facial expression.
             combined_mood:  Combined score of facial + text sentiment.
             lang:           ISO 639-1 language code detected from the user's text.
 
@@ -91,15 +93,40 @@ class GroqChat:
             The AI companion's reply as a string.
         """
         lang_name = _LANG_NAMES.get(lang, "English")
+        conf_percent = round(facial_emotion_confidence * 100)
+
+        # Build dynamic uncertainty instructions for the LLM based on confidence brackets
+        if facial_emotion_confidence > 0.70:
+            emotion_instructions = (
+                f"- The user's FACIAL EXPRESSION is detected with HIGH confidence: "
+                f"{facial_emotion.capitalize()} ({conf_percent}% confidence).\n"
+                f"- IMPORTANT: You MUST refer to their emotion scientifically and warm-neutrally. "
+                f"Do not assume or claim to know their feelings (e.g. do NOT say 'You look like you're having a great day!'). "
+                f"Instead, state it as: 'I detected a {facial_emotion} facial expression ({conf_percent}% confidence). How are you feeling today?' "
+                f"Or adapt it similarly to be objective and scientific, yet friendly and supportive."
+            )
+        elif facial_emotion_confidence >= 0.40:
+            emotion_instructions = (
+                f"- The user's FACIAL EXPRESSION is detected with MEDIUM confidence: "
+                f"Possible facial expression: {facial_emotion.capitalize()} ({conf_percent}% confidence).\n"
+                f"- IMPORTANT: Since the confidence is low/medium (40%-70%), do NOT assume they feel this way. "
+                f"Instead, refer to it only as a possible expression and ask neutral check-in questions. "
+                f"For example, you could say: 'Possible facial expression: {facial_emotion.capitalize()} ({conf_percent}% confidence). How is your day going?' "
+                f"Do not act certain or assume emotion."
+            )
+        else:
+            emotion_instructions = (
+                f"- The user's FACIAL EXPRESSION is UNCERTAIN (confidence {conf_percent}% is under 40%).\n"
+                f"- IMPORTANT: Because it is completely uncertain, DO NOT assume any emotion, DO NOT refer to any facial cues or expressions. "
+                f"Be warm, friendly, and completely neutral in your tone."
+            )
 
         # Build the system message with emotion + language context
         system_message = (
             f"{SYSTEM_PROMPT}\n\n"
             f"EMOTION CONTEXT:\n"
-            f"- The user's FACIAL EXPRESSION (from camera) is: {facial_emotion}\n"
-            f"- The user's overall mood (face + text combined) is: {combined_mood}\n"
-            f"Adapt your tone and response to match their emotional state. "
-            f"If they look sad, be comforting. If happy, be upbeat.\n\n"
+            f"{emotion_instructions}\n"
+            f"- The user's overall mood (face + text combined) is: {combined_mood}\n\n"
             f"LANGUAGE: The user is writing in {lang_name}. "
             f"You MUST reply in {lang_name}."
         )
@@ -135,24 +162,41 @@ class GroqChat:
         log.info("AI response: %s", reply)
         return reply
 
-    def get_opening_message(self, emotion: str) -> str:
-        """Generate a context-aware opening message based on the detected emotion.
+    def get_opening_message(self, emotion: str, confidence: float = 1.0) -> str:
+        """Generate a context-aware opening message based on the detected emotion and confidence.
 
         This is used when the AI companion starts the conversation.
 
         Args:
             emotion: The detected facial emotion.
+            confidence: The confidence of the detected facial emotion.
 
         Returns:
             An empathetic opening message.
         """
-        prompt = (
-            f"The user just sat down and their facial expression shows '{emotion}'. "
-            f"Greet them warmly and naturally in 1-2 sentences, appropriate to their mood. "
-            f"Do not mention 'facial expression' or 'emotion detection' explicitly."
-        )
+        conf_percent = round(confidence * 100)
+        if confidence > 0.70:
+            prompt = (
+                f"Greet the user warmly and scientifically state the detected facial expression. "
+                f"You MUST say something like: 'I detected a {emotion} facial expression ({conf_percent}% confidence). How are you feeling today?' "
+                f"Keep it to 1-2 sentences."
+            )
+        elif confidence >= 0.40:
+            prompt = (
+                f"Greet the user warmly and mention that you detected a possible facial expression of '{emotion}' with {conf_percent}% confidence. "
+                f"Ask a warm, neutral check-in question, without assuming their feelings. Keep it to 1-2 sentences."
+            )
+        else:
+            prompt = (
+                f"Greet the user warmly and neutrally. Since the facial expression is uncertain (confidence under 40%), "
+                f"do not mention any facial expressions or emotions. Just greet them and ask how they are doing. Keep it to 1-2 sentences."
+            )
 
-        return self.get_response(prompt, emotion)
+        return self.get_response(
+            prompt,
+            facial_emotion=emotion,
+            facial_emotion_confidence=confidence
+        )
 
     def clear_history(self) -> None:
         """Reset the conversation history."""

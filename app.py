@@ -53,6 +53,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async_mode)
 _emotion_detector: EmotionDetector | None = None
 _camera_lock = threading.Lock()
 _current_emotion = "neutral"
+_current_emotion_confidence = 1.0
 _use_camera = False
 
 # Per-client sessions  {sid: {chat, sentiment, session, analytics}}
@@ -104,7 +105,7 @@ def _init_camera(enabled: bool, cam_index: int = 0) -> None:
 
 def _emotion_loop() -> None:
     """Background thread: continuously analyse emotions from the webcam."""
-    global _current_emotion
+    global _current_emotion, _current_emotion_confidence
     while True:
         if not _use_camera or _emotion_detector is None:
             time.sleep(1)
@@ -113,9 +114,12 @@ def _emotion_loop() -> None:
             with _camera_lock:
                 frame = _emotion_detector.capture_frame()
             emotion, conf = _emotion_detector.detect_emotion(frame=frame)
-            if conf >= settings.EMOTION_CONFIDENCE_THRESHOLD:
-                _current_emotion = emotion
-            socketio.emit("emotion_update", {"emotion": _current_emotion})
+            _current_emotion = emotion
+            _current_emotion_confidence = float(conf)
+            socketio.emit("emotion_update", {
+                "emotion": _current_emotion,
+                "confidence": _current_emotion_confidence
+            })
         except Exception:
             pass
         time.sleep(settings.EMOTION_ANALYSIS_INTERVAL)
@@ -202,13 +206,14 @@ def on_connect():
     }
 
     try:
-        opening = chat.get_opening_message(_current_emotion)
+        opening = chat.get_opening_message(_current_emotion, _current_emotion_confidence)
     except Exception:
         opening = "Hello! I'm your AI companion. How are you feeling today?"
 
     emit("ai_response", {
         "text": opening,
         "emotion": _current_emotion,
+        "confidence": _current_emotion_confidence,
         "greeting": True,
         "lang": "en",
     })
@@ -228,7 +233,7 @@ def on_disconnect():
 @socketio.on("browser_frame")
 def on_browser_frame(data):
     """Receive a camera frame from the browser and run emotion detection."""
-    global _current_emotion
+    global _current_emotion, _current_emotion_confidence
     image_data = data.get("image", "")
     if not image_data or "," not in image_data:
         return
@@ -243,9 +248,12 @@ def on_browser_frame(data):
         result = detector.top_emotion(frame)
         if result and result[0]:
             emotion, conf = result
-            if conf >= settings.EMOTION_CONFIDENCE_THRESHOLD:
-                _current_emotion = emotion
-                emit("emotion_update", {"emotion": emotion})
+            _current_emotion = emotion
+            _current_emotion_confidence = float(conf)
+            emit("emotion_update", {
+                "emotion": emotion,
+                "confidence": float(conf)
+            })
     except Exception as exc:
         log.warning("browser_frame error: %s", exc)
 
@@ -280,6 +288,7 @@ def on_vision_frame(data):
             emit("ai_proactive", {
                 "text": message,
                 "emotion": _current_emotion,
+                "confidence": _current_emotion_confidence,
                 "lang": lang,
             })
             log.info("Proactive observation: %s", message[:50])
@@ -316,6 +325,7 @@ def on_analyze_image(data):
             emit("ai_response", {
                 "text": response,
                 "emotion": _current_emotion,
+                "confidence": _current_emotion_confidence,
                 "lang": lang,
                 "vision": True,
             })
@@ -329,6 +339,7 @@ def on_analyze_image(data):
         emit("ai_response", {
             "text": "I couldn't analyze the image. Please try again.",
             "emotion": _current_emotion,
+            "confidence": _current_emotion_confidence,
             "lang": "en",
         })
     finally:
@@ -377,16 +388,18 @@ def on_user_message(data):
         emit("ai_response", {
             "text": farewell,
             "emotion": _current_emotion,
+            "confidence": _current_emotion_confidence,
             "farewell": True,
             "lang": ctx.get("lang", "en"),
         })
         ctx["processing"] = False
         return
 
-    # LLM response — pass both facial emotion and combined mood
+    # LLM response — pass both facial emotion, confidence, and combined mood
     reply = ctx["chat"].get_response(
         text,
         facial_emotion=_current_emotion,
+        facial_emotion_confidence=_current_emotion_confidence,
         combined_mood=combined,
         lang=lang,
     )
@@ -402,6 +415,7 @@ def on_user_message(data):
     emit("ai_response", {
         "text": reply,
         "emotion": _current_emotion,
+        "confidence": _current_emotion_confidence,
         "mood": combined,
         "lang": lang,
     })

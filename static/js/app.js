@@ -358,12 +358,29 @@ function animate() {
 // =============================================================
 //  EMOTION
 // =============================================================
-function setEmotion(emotion) {
-    currentEmotion = emotion;
-    targetColors   = EMOTION_PALETTE[emotion] || EMOTION_PALETTE.neutral;
-    // Update badge
-    if (emotionIcon) emotionIcon.textContent = EMOTION_ICONS[emotion] || '😐';
-    if (emotionText) emotionText.textContent  = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+function setEmotion(emotion, confidence) {
+    if (confidence === undefined) {
+        confidence = 1.0;
+    }
+
+    const confPercent = Math.round(confidence * 100);
+
+    if (confidence > 0.70) {
+        currentEmotion = emotion;
+        targetColors   = EMOTION_PALETTE[emotion] || EMOTION_PALETTE.neutral;
+        if (emotionIcon) emotionIcon.textContent = EMOTION_ICONS[emotion] || '😐';
+        if (emotionText) emotionText.textContent  = `Detected facial expression: ${emotion.charAt(0).toUpperCase() + emotion.slice(1)} (${confPercent}%)`;
+    } else if (confidence >= 0.40) {
+        currentEmotion = emotion;
+        targetColors   = EMOTION_PALETTE[emotion] || EMOTION_PALETTE.neutral;
+        if (emotionIcon) emotionIcon.textContent = EMOTION_ICONS[emotion] || '😐';
+        if (emotionText) emotionText.textContent  = `Possible facial expression: ${emotion.charAt(0).toUpperCase() + emotion.slice(1)} (${confPercent}%)`;
+    } else {
+        currentEmotion = 'neutral';
+        targetColors   = EMOTION_PALETTE.neutral;
+        if (emotionIcon) emotionIcon.textContent = '😐';
+        if (emotionText) emotionText.textContent  = "Facial expression uncertain.";
+    }
 }
 
 // =============================================================
@@ -386,7 +403,7 @@ function initSocket() {
         isWaitingForResponse = false;
         hideTyping();
         addMessage('ai', data.text);
-        if (data.emotion) setEmotion(data.emotion);
+        if (data.emotion) setEmotion(data.emotion, data.confidence);
         if (data.lang) setLanguage(data.lang);
         speakText(data.text, data.lang);
         if (data.farewell) disableInput();
@@ -396,12 +413,13 @@ function initSocket() {
         // AI is proactively commenting on what it sees
         isWaitingForResponse = false;
         addMessage('ai', data.text);
+        if (data.emotion) setEmotion(data.emotion, data.confidence);
         if (data.lang) setLanguage(data.lang);
         speakText(data.text, data.lang);
     });
 
     socket.on('emotion_update', (data) => {
-        if (data.emotion) setEmotion(data.emotion);
+        if (data.emotion) setEmotion(data.emotion, data.confidence);
     });
 
     socket.on('session_ended', () => {
