@@ -442,11 +442,5 @@ def main():
     socketio.run(app, host=args.host, port=args.port, debug=False, allow_unsafe_werkzeug=True)
 
 
-import os
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    main()
