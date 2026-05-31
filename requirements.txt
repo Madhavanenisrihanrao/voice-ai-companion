@@ -14,3 +14,4 @@ gunicorn
 simple-websocket
 langdetect
 gTTS
+eventlet
